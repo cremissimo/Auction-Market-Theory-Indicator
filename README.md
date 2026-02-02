@@ -13,6 +13,8 @@ TradingView Pine Script v6 indicator that plots Auction Market Theory (AMT) sess
 - Previous session level carry-forward.
 - Bookmap CSV-style logging and alert payload formatting.
 
+![AMT levels example](assets/amt_levels.png)
+
 ## Inputs
 
 - Sessions: `RTH session time`, `ETH session time`.
@@ -61,6 +63,4 @@ Suggested flow:
 
 - [src/auction-market-theory.pine](src/auction-market-theory.pine) — indicator source.
 
-## Examples
 
-![AMT levels example](assets/amt_levels.png)
