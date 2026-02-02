@@ -1,0 +1,588 @@
+//@version=6
+
+indicator("Auction Market Theory Levels", "AMT Levels", overlay=true, max_lines_count=500, max_labels_count=500)
+
+const int LABEL_SPACE = 10
+// ─── INPUTS ──────────────────────────────────────────────────────
+
+
+inRangeYesterday = false
+colorSession1 = input.bool(true, "Color RTH session")
+sessionColor = input.color(color.new(color.yellow, 85), "Session color")
+// useAllHistory = input.bool(false, "Use all historical data")
+// useLastSession = input.bool(true, "Evaluate only last sessions")
+lookBackTime = input.int(96, "Look back time in hours for previous sessions")
+showPreviousONRefSession = input.bool(false, "Show Lables of previous ETH sessions")
+showPreviousLablesRefSession = input.bool(false, "Show Lables of previous RTH sessions")
+
+
+today     = time("D")
+yesterday = time("D")[1] 
+sessionLength = 9 * 60 * 60 * 1000
+last24h = timenow - (lookBackTime * 60 * 60 * 1000 + sessionLength) 
+inRangeYesterday := time >= last24h
+
+// Sessions
+// , options=["0830-1600","0830-1500", "0200-0830"]
+todaySession     = input.session("0900-1730", "RTH session time", group = "Session")
+// , options=["1600-0830","1500-0830", "1700-0300"]
+overnightSession = input.session("1730-0900", "ETH session time", group = "Session")
+
+bookmapPrefix = input.string("ESH6.CME@BMD", "Symbol Prefix", group = "Bookmap datafeed symbol", options = ["FESX 20260320 M|EUREX|F@IB","ESH6.CME@BMD", "BTC-USDT:MB:PERP@BMD"])
+
+showLabels = input.bool(true, "Show price labels", group = "Lables and lines")
+showLines = input.bool(true, "Show Lines at price levels", group = "Lables and lines")
+extendLines = input.bool(true, "Extend lines to the right", group = "Lables and lines")
+
+
+plotVWAP = input.bool(true, title="Session VWAP", group = "VWAP")
+vwapColor = input.color(color.orange, "VWAP color", group = "VWAP")
+
+// Show visuals
+showHighLowfLevels = input.bool(true, "Show HOD and LOD", group = "Levels")
+showIBlevels = input.bool(true, "Show IB", group = "Levels")
+showIB30levels = input.bool(true, "Show IB30", group = "Levels")
+showIB60levels = input.bool(true, "Show IB60", group = "Levels")
+showIB1_5levels = input.bool(true, "Show IB1.5", group = "Levels")
+showIB2levels = input.bool(true, "Show IB2", group = "Levels")
+showONLevels  = input.bool(true, "Show ONH, ONL, ONVPOC, ONMID", group = "Levels")
+showVA       = input.bool(true, "Show VAH and VAL", group = "Levels")
+showVPOC       = input.bool(true, "Show VPOC", group = "Levels")
+
+
+
+// Value Area %
+valueAreaPct = input.float(0.70, "Value Area %", step=0.05)
+numOfHistograms = input.int(200, "Number of Histograms", minval=20, maxval=300)
+
+
+
+// Volume Profile 
+// ─── FUNCTION: VALUE AREA CALCULATION ────────────────────────────
+f_get_value_area(_buyVolList, _sellVolList, _highList, _lowList, _indexPoc, _vpocVol, _totalVol, _valueArea) =>
+    _n = array.size(_buyVolList)
+    areaVol = _vpocVol
+    upper = _indexPoc
+    lower = _indexPoc
+    threshold =  _valueArea * _totalVol
+    while areaVol < threshold
+        nextU = upper + 1
+        nextL = lower - 1
+        volU = nextU < _n ? array.get(_buyVolList, nextU) + array.get(_sellVolList, nextU) : 0
+        volL = nextL >= 0 ? array.get(_buyVolList, nextL) + array.get(_sellVolList, nextL) : 0
+        if volU >= volL and nextU < _n
+            areaVol += volU
+            upper += 1
+        else if nextL >= 0
+            areaVol += volL
+            lower -= 1
+        else
+            break
+    [math.round_to_mintick(array.get(_highList, upper)), math.round_to_mintick(array.get(_lowList, lower))]
+
+//────────────────────────────
+// Function: calculates the vpoc 
+//────────────────────────────
+f_calculate_vpoc(rangeLow, rangeHigh, sessionBarCounter, numHistograms) =>
+    rangeH = rangeHigh - rangeLow
+    histH  = rangeH / numHistograms
+
+    // Create histogram arrays
+    hLow  = array.new_float(numHistograms)
+    hHigh = array.new_float(numHistograms)
+    hBuy  = array.new_float(numHistograms, 0.0)
+    hSell = array.new_float(numHistograms, 0.0)
+
+    // Initialize price bins
+    for i = 0 to numHistograms - 1
+        array.set(hLow, i, rangeLow + histH * i)
+        array.set(hHigh, i, rangeLow + histH * (i + 1))
+
+    if sessionBarCounter > 0 and bar_index > 0
+
+        lookback = math.min(sessionBarCounter - 1, bar_index )
+        // Fill histogram with volume
+        // if sessionBarCounter > 0
+        for i = 0 to lookback
+            if high[i] != low[i]
+                for j = 0 to numHistograms - 1
+                    lowJ  = array.get(hLow, j)
+                    highJ = array.get(hHigh, j)
+                    overlap = math.max(0, math.min(high[i], highJ) - math.max(low[i], lowJ))
+                    if overlap > 0
+                        frac = overlap / (high[i] - low[i])
+                        buyVol  = volume[i] * (close[i] - low[i]) / (high[i] - low[i]) * frac
+                        sellVol = volume[i] * (high[i] - close[i]) / (high[i] - low[i]) * frac
+                        array.set(hBuy, j,  array.get(hBuy, j)  + buyVol)
+                        array.set(hSell, j, array.get(hSell, j) + sellVol)
+
+    // Identify VPOC
+    vpocVol = 0.0
+    idxPoc = 0
+    _totalVol = 0.0
+    for i = 0 to numHistograms - 1
+        vol = array.get(hBuy, i) + array.get(hSell, i)
+        _totalVol += vol
+        if vol > vpocVol
+            vpocVol := vol
+            idxPoc := i
+    _VPOC = math.round_to_mintick((array.get(hHigh, idxPoc) + array.get(hLow, idxPoc)) / 2)
+    [_VPOC, hBuy, hSell, hHigh, hLow, idxPoc, vpocVol, _totalVol]
+
+
+// var float[] hLow  = array.new_float()
+// var float[] hHigh = array.new_float()
+// var float[] hBuy  = array.new_float()
+// var float[] hSell = array.new_float()
+
+// newSession = ta.change(time("D"))
+
+// f_update_vpoc(
+//      float rangeLow,
+//      float rangeHigh,
+//      int   numHistograms,
+//      bool  newSession,
+//      float[] hLow,
+//      float[] hHigh,
+//      float[] hBuy,
+//      float[] hSell
+// ) =>
+//     // ──────────────
+//     // Session init
+//     // ──────────────
+//     if newSession
+//         array.clear(hLow)
+//         array.clear(hHigh)
+//         array.clear(hBuy)
+//         array.clear(hSell)
+
+//         rangeH = rangeHigh - rangeLow
+//         histH  = rangeH / numHistograms
+
+//         for j = 0 to numHistograms - 1
+//             array.push(hLow,  rangeLow + histH * j)
+//             array.push(hHigh, rangeLow + histH * (j + 1))
+//             array.push(hBuy,  0.0)
+//             array.push(hSell, 0.0)
+
+    // ──────────────
+    // Incremental update (current bar only)
+    // ──────────────
+    // if high != low
+    //     barRange = high - low
+    //     buyFrac  = (close - low) / barRange
+    //     sellFrac = (high - close) / barRange
+
+    //     if hLow.size() > 0 and hHigh.size() > 0
+    //         for j = 0 to numHistograms - 1
+    //             lowJ  = array.get(hLow, j)
+    //             highJ = array.get(hHigh, j)
+    //             overlap = math.max(0.0, math.min(high, highJ) - math.max(low, lowJ))
+
+    //             if overlap > 0
+    //                 frac = overlap / barRange
+    //                 array.set(hBuy,  j, array.get(hBuy,  j) + volume * buyFrac  * frac)
+    //                 array.set(hSell, j, array.get(hSell, j) + volume * sellFrac * frac)
+
+    // // ──────────────
+    // // Find VPOC
+    // // ──────────────
+    // vpocVol  = 0.0
+    // idxPoc   = 0
+    // totalVol = 0.0
+    // if hBuy.size() > 0 and hSell.size() > 0
+    //     for j = 0 to numHistograms - 1
+    //         vol = array.get(hBuy, j) + array.get(hSell, j)
+    //         totalVol += vol
+    //         if vol > vpocVol
+    //             vpocVol := vol
+    //             idxPoc  := j
+
+    //     VPOC = math.round_to_mintick(
+    //         (array.get(hHigh, idxPoc) + array.get(hLow, idxPoc)) / 2
+    //     )
+
+    //     [VPOC, idxPoc, vpocVol, totalVol]
+    // [0, 0, 0, 0]   
+
+// ===== CONSTANTS =====
+string CSV_SYMBOL = bookmapPrefix
+const string FG_COLOR  = "#000000"
+const string ALIGN     = "left"
+const string DIAMETER  = "1"
+
+// ===== SINGLE-LINE LOGGER =====
+f_log_level(price, note, bgColor, drawLine) =>
+    log.info(
+        '"' + CSV_SYMBOL + '",' +
+        str.tostring(price) + ',' +
+        note + ',' +
+        FG_COLOR + ',' +
+        bgColor + ',' +
+        ALIGN + ',' +
+        DIAMETER + ',' +
+        (drawLine ? "TRUE" : "")
+    )
+
+f_build_level_msg(price, note, bgColor, drawLine) =>
+    (
+        '"' + CSV_SYMBOL + '",' +
+        str.tostring(price) + ',' +
+        note + ',' +
+        FG_COLOR + ',' +
+        bgColor + ',' +
+        ALIGN + ',' +
+        DIAMETER + ',' +
+        (drawLine ? "TRUE" : "")
+    )
+
+// alert_message(price, note, bgColor, drawLine) =>
+//         m = CSV_SYMBOL + '",' + str.tostring(price) + ',' + note + ',' + FG_COLOR + ',' + bgColor + ',' + ALIGN + ',' + DIAMETER + ',' + (drawLine ? "TRUE" : "" )
+
+
+create_line(price, color, line_style) =>
+    line.new(bar_index, price, bar_index + 1, price,extend=extendLines ? extend.right : extend.none,color=color, width=1, style=line_style)
+
+
+create_label(name, price, color, label_style) =>
+    label.new(bar_index, price, text=name + " " + str.tostring(price), style=label_style, color=color, textcolor=color.black, size=size.small)
+
+
+reset_lines(_array) =>
+     // remove old drawings
+    if _array.size() > 0
+        for i = 0 to _array.size()            
+            l = _array.shift()
+            line.delete(l)
+reset_labels(_array) =>
+     // remove old drawings
+    if _array.size() > 0
+        for i = 0 to _array.size()            
+            l = _array.shift()
+            label.delete(l)
+
+
+// ─── VARIABLES ───────────────────────────────────────────────────
+
+type KeyLevel
+    float high = na
+    float low  = na
+    float mid  = na
+    float vah     = na
+    float val     = na
+    float vpoc    = na
+    float ibh = na
+    float ibl  = na
+    float ibh30 = na
+    float ibl30  = na    
+    float ibl1_5  = na
+    float ibh1_5  = na
+    float ibh2  = na
+    float ibl2  = na
+    float ibl0_5  = na
+    float ibh0_5  = na
+
+var sessionLevels = KeyLevel.new()
+var LastETHLevels = KeyLevel.new()
+var LastRTHLevels = KeyLevel.new()
+var onLevels = KeyLevel.new()
+
+
+// ETH VPOC
+var float onSessionHigh = na
+var float onSessionLow  = na
+var int   onSessionBarCount = 0
+
+// RTH VPOC
+var int   sessionBarCount = 0
+
+// IB
+var int firstHourStartTime = na
+var bool first60min = false
+var bool first30min = false
+
+// === DRAWING HANDLES ===
+var ONlinesRef = array.new_line()
+var ONlabelsRef = array.new_label()
+var IBlabelsRef = array.new_label()
+var IBlinesRef = array.new_line()
+
+
+var string msg = "" 
+
+var line HODLine = na
+var line LODLine  = na
+var label HODLabel = na
+var label LODLabel = na
+
+var SessionLinesRef = array.new_line()
+var SessionLabelsRef = array.new_label()
+
+var PastSessionLinesRef = array.new_line()
+var PastSessionLabelsRef = array.new_label()
+
+hiLoColor = color.white
+onColor = color.red
+valueColor = color.yellow
+ibColor = color.green
+ibColorBl = color.blue
+vaColor = color.yellow
+
+var int label_loc = bar_index + LABEL_SPACE
+
+// ─── SESSION DETECTION ───────────────────────────────────────────
+inRTHSession = not na(time(timeframe.period, todaySession))
+inON   = not na(time(timeframe.period, overnightSession))
+dayChange = ta.change(time("D")) != 0
+newONSession = inON and not inON[1]
+endONSession = inON[1] and not inON
+endRTHSession = inRTHSession[1] and not inRTHSession
+newRTHSession = inRTHSession and not inRTHSession[1]
+
+
+// copy historic lines and labels
+if showPreviousLablesRefSession and endRTHSession
+    if SessionLinesRef.size() > 0    
+        for i = 0 to SessionLinesRef.size() - 1 
+            PastSessionLinesRef.push(SessionLinesRef.get(i).copy())
+            PastSessionLabelsRef.push(SessionLabelsRef.get(i).copy()) 
+
+    if IBlinesRef.size() > 0
+        for i = 0 to IBlinesRef.size() - 1 
+            PastSessionLinesRef.push(IBlinesRef.get(i).copy())
+            PastSessionLabelsRef.push(IBlabelsRef.get(i).copy())  
+
+if showPreviousONRefSession and endONSession
+    if ONlinesRef.size() > 0
+        for i = 0 to ONlinesRef.size() - 1 
+            PastSessionLinesRef.push(ONlinesRef.get(i).copy())
+            PastSessionLabelsRef.push(ONlabelsRef.get(i).copy())  
+
+// === RESET ON NEW SESSION ===
+if newRTHSession
+
+    reset_lines(IBlinesRef)
+    reset_labels(IBlabelsRef)
+    
+    sessionLevels := KeyLevel.new()
+    firstHourStartTime := time
+    first60min := false
+    first30min := false
+    
+    sessionBarCount := 0
+
+if newONSession
+
+    reset_lines(ONlinesRef)
+    reset_labels(ONlabelsRef)
+
+    onLevels := KeyLevel.new()
+    onSessionBarCount := 0
+
+if inRangeYesterday // limt number of processed bars lookback period
+
+    // ETH session, overnight
+    if inON and showONLevels
+
+        // current high and low 
+        onLevels.high := na(onLevels.high) ? high : math.max(onLevels.high, high)
+        onLevels.low  := na(onLevels.low)  ? low  : math.min(onLevels.low, low)
+        if not na(onLevels.high) and not na(onLevels.low)    
+            onLevels.mid :=  math.round_to_mintick(onLevels.low + (onLevels.high - onLevels.low) / 2)
+        onSessionBarCount += 1
+        onSessionHigh := onLevels.high
+        onSessionLow := onLevels.low
+
+        // [ONVPOC, _, _, _] = f_update_vpoc(onLevels.low,onLevels.high,numOfHistograms,newONSession,hLow, hHigh, hBuy,hSell)
+        if endONSession or barstate.isconfirmed
+            [ONVPOC, _, _, _, _, _, _, _] = f_calculate_vpoc(onSessionLow, onSessionHigh, onSessionBarCount, numOfHistograms)
+            onLevels.vpoc := ONVPOC
+
+            if showLabels and showONLevels
+                reset_labels(ONlabelsRef)
+                ONlabelsRef.push(create_label("ONVPOC", onLevels.vpoc, onColor, label.style_label_center))
+                ONlabelsRef.push(label.new(bar_index, onLevels.high, text=" ONH " + str.tostring(onLevels.high), style=label.style_label_down, color=onColor, textcolor=color.black, size=size.small))
+                ONlabelsRef.push(label.new(bar_index, onLevels.low, text=" ONL " + str.tostring(onLevels.low), style=label.style_label_up, color=onColor, textcolor=color.black, size=size.small))
+                ONlabelsRef.push(label.new(bar_index, onLevels.mid, text=" ON Mid " + str.tostring(onLevels.mid), style=label.style_label_up, color=onColor, textcolor=color.black, size=size.small))
+                
+            if showLines and showONLevels
+                reset_lines(ONlinesRef)
+                ONlinesRef.push(create_line(onLevels.vpoc, onColor, line.style_dashed))
+                ONlinesRef.push(create_line(onLevels.high, onColor, line.style_solid))
+                ONlinesRef.push(create_line(onLevels.low, onColor, line.style_solid))
+                ONlinesRef.push(create_line(onLevels.mid, onColor, line.style_solid))
+
+
+    // Intraday session RTH
+    if inRTHSession
+
+        // HOD and LOD 
+        sessionLevels.high := na(sessionLevels.high) ? high : math.max(sessionLevels.high, high)
+        sessionLevels.low  := na(sessionLevels.low)  ? low  : math.min(sessionLevels.low, low)
+        sessionBarCount += 1
+
+        // resett every tick
+        reset_labels(SessionLabelsRef)
+        reset_lines(SessionLinesRef)
+
+        if showHighLowfLevels and showLines        
+            SessionLinesRef.push(create_line(sessionLevels.high, hiLoColor, line.style_solid))
+            SessionLinesRef.push(create_line(sessionLevels.low, hiLoColor, line.style_solid))
+
+        if showHighLowfLevels and showLabels
+            SessionLabelsRef.push(label.new(bar_index, sessionLevels.high, text=" HOD " + str.tostring(sessionLevels.high), style=label.style_label_down, color=hiLoColor, textcolor=color.red, size=size.small))
+            SessionLabelsRef.push(label.new(bar_index, sessionLevels.low, text=" LOD " + str.tostring(sessionLevels.low), style=label.style_label_up, color=hiLoColor, textcolor=color.red, size=size.small))
+
+        // IB levels
+        if not first60min
+        
+            sessionLevels.ibh := na(sessionLevels.ibh) ? high : math.max(sessionLevels.ibh, high)
+            sessionLevels.ibl  := na(sessionLevels.ibl)  ? low  : math.min(sessionLevels.ibl, low)
+
+            // IB30
+            if time - firstHourStartTime >= 30 * 60 * 1000 and not na(sessionLevels.ibh) and not first30min and showIB30levels and showIBlevels
+                first30min := true
+                sessionLevels.ibh30 := sessionLevels.ibh
+                sessionLevels.ibl30 := sessionLevels.ibl
+                
+
+                if showLines
+                    IBlinesRef.push(create_line(sessionLevels.ibh30, ibColor, line.style_solid))
+                    IBlinesRef.push(create_line(sessionLevels.ibl30, ibColor, line.style_solid))
+                if showLabels   
+                    IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh30, text="IBH30 " + str.tostring(sessionLevels.ibh30), style=label.style_label_up, color=ibColor, textcolor=color.white, size=size.small))
+                    IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl30, text="IBL30 " + str.tostring(sessionLevels.ibl30), style=label.style_label_up, color=ibColor, textcolor=color.white, size=size.small))
+                  
+            // IB 60
+            if time - firstHourStartTime >= 60 * 60 * 1000 and showIBlevels and not first60min
+                first60min := true
+                distance = sessionLevels.ibh - sessionLevels.ibl
+                sessionLevels.ibh0_5 := math.round_to_mintick(sessionLevels.ibh  + distance * 0.5)
+                sessionLevels.ibh1_5 := math.round_to_mintick(sessionLevels.ibh  + distance * 1.5)
+                sessionLevels.ibh2 := sessionLevels.ibh + distance * 2
+                sessionLevels.ibl0_5 := math.round_to_mintick(sessionLevels.ibl - distance * 0.5)
+                sessionLevels.ibl1_5 := math.round_to_mintick(sessionLevels.ibl - distance * 1.5)
+                sessionLevels.ibl2 := sessionLevels.ibl - distance * 2
+
+                if showLines
+                    if showIB60levels
+                        IBlinesRef.push(create_line(sessionLevels.ibh, ibColor, line.style_solid))
+                        IBlinesRef.push(create_line(sessionLevels.ibl, ibColor, line.style_solid))
+        
+                    if showIB1_5levels
+                        IBlinesRef.push(create_line(sessionLevels.ibh1_5, ibColor, line.style_solid))
+                        IBlinesRef.push(create_line(sessionLevels.ibl1_5, ibColor, line.style_solid))
+
+                        IBlinesRef.push(create_line(sessionLevels.ibh0_5, ibColor, line.style_solid))
+                        IBlinesRef.push(create_line(sessionLevels.ibl0_5, ibColor, line.style_solid))
+                    if showIB2levels   
+                        IBlinesRef.push(create_line(sessionLevels.ibl2, ibColor, line.style_solid))
+                        IBlinesRef.push(create_line(sessionLevels.ibl2, ibColor, line.style_solid))
+            
+                if showLabels
+                    if showIB60levels
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh, text=" IBH60 " + str.tostring(sessionLevels.ibh), style=label.style_label_up, color=ibColor, textcolor=color.black, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl, text=" IBL60 " + str.tostring(sessionLevels.ibl), style=label.style_label_down, color=ibColor, textcolor=color.black, size=size.small))
+                    if showIB1_5levels
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl1_5, text="IBL1.5 " + str.tostring(sessionLevels.ibl1_5), style=label.style_label_down, color=ibColorBl, textcolor=color.white, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh1_5, text="IBH1.5 " + str.tostring(sessionLevels.ibh1_5), style=label.style_label_up, color=ibColorBl, textcolor=color.white, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl0_5, text="IBL0.5 " + str.tostring(sessionLevels.ibl0_5), style=label.style_label_down, color=ibColorBl, textcolor=color.white, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh0_5, text="IBH0.5 " + str.tostring(sessionLevels.ibh0_5), style=label.style_label_up, color=ibColorBl, textcolor=color.white, size=size.small))
+                    if showIB2levels   
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl2, text="IBL2 " + str.tostring(sessionLevels.ibl2), style=label.style_label_down, color=ibColorBl, textcolor=color.white, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh2, text="IBH2 " + str.tostring(sessionLevels.ibh2), style=label.style_label_up, color=ibColorBl, textcolor=color.white, size=size.small))
+
+        if endRTHSession  or barstate.isconfirmed
+            // Value area and VPOC
+            // Compute VPOC
+            [VPOC, hBuy, hSell, hHigh, hLow, idxPoc, vpocVol, totalVol] = f_calculate_vpoc(sessionLevels.low, sessionLevels.high, sessionBarCount, numOfHistograms)
+
+            // Compute VAH/VAL
+            [VAH, VAL] = f_get_value_area(hBuy, hSell, hHigh, hLow, idxPoc, vpocVol, totalVol, valueAreaPct)
+
+            // Store as previous day
+            sessionLevels.vah  := VAH
+            sessionLevels.val  := VAL
+            sessionLevels.vpoc := VPOC
+
+            if showLabels    
+                if showVA
+                    SessionLabelsRef.push(label.new(time, sessionLevels.vah,xloc=xloc.bar_time,  text="VAH: " + str.tostring(sessionLevels.vah), color=vaColor, textcolor=color.black, style=label.style_label_down, size=size.small))
+                    SessionLabelsRef.push(label.new(bar_index, sessionLevels.val,  text="VAL: " + str.tostring(sessionLevels.val), color=vaColor, textcolor=color.black, style=label.style_label_up, size=size.small))
+                if showVPOC
+                    SessionLabelsRef.push(label.new(bar_index, sessionLevels.vpoc, text="VPOC: " + str.tostring(sessionLevels.vpoc), color=vaColor, textcolor=color.black, style=label.style_label_center, size=size.small))
+            if showLines
+                if showVA
+                    SessionLinesRef.push(create_line(sessionLevels.val, vaColor, line.style_solid))
+                    SessionLinesRef.push(create_line(sessionLevels.vah, vaColor, line.style_solid))
+                if showVPOC
+                    SessionLinesRef.push(create_line(sessionLevels.vpoc, vaColor, line.style_dashed))
+
+
+    if endRTHSession
+        LastRTHLevels.vpoc := sessionLevels.vpoc
+        LastRTHLevels.vah := sessionLevels.vah
+        LastRTHLevels.val := sessionLevels.val
+        LastRTHLevels.high := sessionLevels.high
+        LastRTHLevels.low := sessionLevels.low
+
+    // if endONSession
+    //     LastETHLevels.vpoc := onLevels.vpoc
+    //     LastETHLevels.high := onLevels.high
+    //     LastETHLevels.low := onLevels.low
+
+
+    if barstate.isconfirmed
+        // log bookmap cloud notes formated levels
+        if inON
+            log.info("======ETH============")
+        if inRTHSession
+            log.info("======RTH============")
+
+        msg := "\n\n" + f_build_level_msg(onLevels.high, "ONH", "#ff0066", false) + "\n"
+        msg += f_build_level_msg(onLevels.low, "ONL", "#ff0066", false) + "\n"
+        msg += f_build_level_msg(onLevels.vpoc, "ONVPOC", "#ff0066", false) + "\n"
+        msg += f_build_level_msg(onLevels.mid, "ONMID", "#ff0066", false) + "\n"
+        msg += f_build_level_msg(LastRTHLevels.vpoc, "PVPOC", "#ffff00", false) + "\n"
+        msg += f_build_level_msg(LastRTHLevels.vah,  "PVAH",  "#ffff00", false) + "\n"
+        msg += f_build_level_msg(LastRTHLevels.val,  "PVAL",  "#ffff00", false) + "\n"
+        msg += f_build_level_msg(LastRTHLevels.high, "YHI", "#33cc00", true) + "\n"
+        msg += f_build_level_msg(LastRTHLevels.low, "YLO", "#33cc00", true) + "\n"    
+        if inRTHSession
+            // intraday levels
+            msg += f_build_level_msg(sessionLevels.vpoc, "DVPOC", "#FFBD88", false) + "\n"
+            msg += f_build_level_msg(sessionLevels.vah,  "DVAH",  "#FFBD88", false) + "\n"
+            msg += f_build_level_msg(sessionLevels.val,  "DVAL",  "#FFBD88", false) + "\n"
+            msg += f_build_level_msg(sessionLevels.high, "HOD", "#33cc00", false) + "\n"
+            msg += f_build_level_msg(sessionLevels.low, "LOD", "#33cc00", false) + "\n"  
+
+            if first60min
+                msg += f_build_level_msg(sessionLevels.ibh, "IBH", "#e7033f", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibl, "IBL", "#e7033f", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibh0_5, "IBH0_5", "#908735", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibl0_5, "IBL0_5", "#908735", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibh1_5, "IBH1_5", "#908735", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibl1_5, "IBL1_5", "#908735", false) + "\n"          
+                msg += f_build_level_msg(sessionLevels.ibh2, "IBH2", "#908735", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibl2, "IBL2", "#908735", false) + "\n"                    
+
+            if first30min
+                msg += f_build_level_msg(sessionLevels.ibh30, "IBH30", "#7f97a1", false) + "\n"  
+                msg += f_build_level_msg(sessionLevels.ibl30, "IBL30", "#7f97a1", false) + "\n"  
+
+        log.info(msg)
+
+        if barstate.isrealtime
+            log.info("Session ended create alert")
+            alert(msg, alert.freq_once_per_bar)
+
+
+// Session background color
+session1Color = colorSession1 and inRTHSession  ? color.new(sessionColor, 85) : na
+bgcolor(session1Color)    
+
+// VWAP
+// Get the volume-weighted average price of hlc3
+hlcVwap = ta.vwap(hlc3, newRTHSession)
+plot(plotVWAP ? hlcVwap : na, color=vwapColor, linewidth=1, title="Session VWAP")
+
