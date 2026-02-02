@@ -1,6 +1,6 @@
 # Auction Market Theory Indicator
 
-Pine Script v6 indicator that plots Auction Market Theory (AMT) session levels for RTH/ETH, including value area, VPOC, initial balance extensions, and session VWAP.
+TradingView Pine Script v6 indicator that plots Auction Market Theory (AMT) session levels for RTH/ETH, including value area, VPOC, initial balance extensions, and session VWAP, with Bookmap cloud notes logging.
 
 ## Features
 
@@ -34,6 +34,33 @@ Pine Script v6 indicator that plots Auction Market Theory (AMT) session levels f
 - VPOC/VAH/VAL are calculated from a volume profile histogram built from session bars.
 - Alerts emit a CSV-style payload containing AMT levels for Bookmap.
 
+## Bookmap Cloud Notes output
+
+The script logs and alerts a CSV-style line compatible with Bookmap Cloud Notes. Each line follows this format:
+
+"SYMBOL",PRICE,NOTE,FG_COLOR,BG_COLOR,ALIGN,DIAMETER,LINE
+
+Example (from the script):
+
+"ESH6.CME@BMD",5243.25,ONVPOC,#000000,#ff0066,left,1,TRUE
+
+`LINE` is `TRUE` when the note should draw a horizontal line in Bookmap; otherwise it is empty.
+
+## Alerts → email → local Bookmap Cloud Notes
+
+TradingView alerts can be configured to send these CSV lines to your email address. A simple Python script can then read the email and publish the notes locally to Bookmap Cloud Notes.
+
+Suggested flow:
+
+1. Create a TradingView alert for this indicator.
+2. Use the alert message template to output the payload (the script already builds the message in `msg`).
+3. Configure the alert to send to your email.
+4. Run a local Python reader that parses the incoming email and forwards the CSV lines to your Bookmap Cloud Notes endpoint.
+
 ## Structure
 
 - [src/auction-market-theory.pine](src/auction-market-theory.pine) — indicator source.
+
+## Examples
+
+![AMT levels example](assets/amt_levels.png)
