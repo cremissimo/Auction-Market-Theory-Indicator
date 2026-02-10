@@ -50,6 +50,13 @@ showVA       = input.bool(true, "Show VAH and VAL", group = "Levels")
 showVPOC       = input.bool(true, "Show VPOC", group = "Levels")
 
 
+hiLoColor = input.color(color.white, "HOD and LOD", group = "Colors")
+onColor = input.color(color.red, "ON", group = "Colors")
+vaColor = input.color(color.yellow, "VAH, VAL and VPOC", group = "Colors")
+ibColor = input.color(color.green, "IB 30 and IB 60", group = "Colors")
+ibColorBl = input.color(color.blue, "IB extension 0.5, 1.5 ,2", group = "Colors")
+textColor = input.color(color.black, "Text color", group = "Colors")
+
 
 // Value Area %
 valueAreaPct = input.float(0.70, "Value Area %", step=0.05)
@@ -106,7 +113,7 @@ f_calculate_vpoc(rangeLow, rangeHigh, sessionBarCounter, numHistograms) =>
         // Fill histogram with volume
         // if sessionBarCounter > 0
         for i = 0 to lookback
-            if high[i] != low[i]
+            if high[i] != low[i]    
                 for j = 0 to numHistograms - 1
                     lowJ  = array.get(hLow, j)
                     highJ = array.get(hHigh, j)
@@ -247,7 +254,7 @@ create_line(price, color, line_style) =>
 
 
 create_label(name, price, color, label_style) =>
-    label.new(bar_index, price, text=name + " " + str.tostring(price), style=label_style, color=color, textcolor=color.black, size=size.small)
+    label.new(bar_index, price, text=name + " " + str.tostring(price), style=label_style, color=color, textcolor=textColor, size=size.small)
 
 
 reset_labels(_array) =>
@@ -317,12 +324,7 @@ var SessionLabelsRef = array.new_label()
 var PastSessionLinesRef = array.new_line()
 var PastSessionLabelsRef = array.new_label()
 
-hiLoColor = color.white
-onColor = color.red
-valueColor = color.yellow
-ibColor = color.green
-ibColorBl = color.blue
-vaColor = color.yellow
+
 
 var int label_loc = bar_index + LABEL_SPACE
 
@@ -341,19 +343,24 @@ if showPreviousLablesRefSession  and endRTHSession
     if SessionLinesRef.size() > 0    
         for i = 0 to SessionLinesRef.size() - 1 
             PastSessionLinesRef.push(SessionLinesRef.get(i).copy())
+    if SessionLabelsRef.size() > 0    
+        for i = 0 to SessionLabelsRef.size() - 1 
             PastSessionLabelsRef.push(SessionLabelsRef.get(i).copy()) 
-
     if IBlinesRef.size() > 0
         for i = 0 to IBlinesRef.size() - 1 
             PastSessionLinesRef.push(IBlinesRef.get(i).copy())
+    if IBlabelsRef.size() > 0
+        for i = 0 to IBlabelsRef.size() - 1 
             PastSessionLabelsRef.push(IBlabelsRef.get(i).copy())  
 
 if showPreviousONRefSession and endONSession
     if ONlinesRef.size() > 0
         for i = 0 to ONlinesRef.size() - 1 
             PastSessionLinesRef.push(ONlinesRef.get(i).copy())
-            PastSessionLabelsRef.push(ONlabelsRef.get(i).copy())  
 
+    if ONlinesRef.size() > 0
+        for i = 0 to ONlabelsRef.size() - 1 
+            PastSessionLabelsRef.push(ONlabelsRef.get(i).copy())  
 
 // === RESET ON NEW SESSION ===
 if newRTHSession
@@ -398,9 +405,9 @@ if inRangeYesterday // limt number of processed bars lookback period
             if showLabels and showONLevels
                 reset_labels(ONlabelsRef)
                 ONlabelsRef.push(create_label("ONVPOC", onLevels.vpoc, onColor, label.style_label_center))
-                ONlabelsRef.push(label.new(bar_index, onLevels.high, text=" ONH " + str.tostring(onLevels.high), style=label.style_label_down, color=onColor, textcolor=color.black, size=size.small))
-                ONlabelsRef.push(label.new(bar_index, onLevels.low, text=" ONL " + str.tostring(onLevels.low), style=label.style_label_up, color=onColor, textcolor=color.black, size=size.small))
-                ONlabelsRef.push(label.new(bar_index, onLevels.mid, text=" ON Mid " + str.tostring(onLevels.mid), style=label.style_label_up, color=onColor, textcolor=color.black, size=size.small))
+                ONlabelsRef.push(label.new(bar_index, onLevels.high, text=" ONH " + str.tostring(onLevels.high), style=label.style_label_down, color=onColor, textcolor=textColor, size=size.small))
+                ONlabelsRef.push(label.new(bar_index, onLevels.low, text=" ONL " + str.tostring(onLevels.low), style=label.style_label_up, color=onColor, textcolor=textColor, size=size.small))
+                ONlabelsRef.push(label.new(bar_index, onLevels.mid, text=" ON Mid " + str.tostring(onLevels.mid), style=label.style_label_up, color=onColor, textcolor=textColor, size=size.small))
                 
             if showLines and showONLevels
                 reset_lines(ONlinesRef)
@@ -419,18 +426,18 @@ if inRangeYesterday // limt number of processed bars lookback period
         sessionBarCount += 1
 
         // resett every tick
-        reset_labels(SessionLabelsRef)
-        reset_lines(SessionLinesRef)
 
    
 
         if showHighLowfLevels and showLines        
+            reset_lines(SessionLinesRef)
             SessionLinesRef.push(create_line(sessionLevels.high, hiLoColor, line.style_solid))
             SessionLinesRef.push(create_line(sessionLevels.low, hiLoColor, line.style_solid))
 
         if showHighLowfLevels and showLabels
-            SessionLabelsRef.push(label.new(bar_index, sessionLevels.high, text=" HOD " + str.tostring(sessionLevels.high), style=label.style_label_down, color=hiLoColor, textcolor=color.red, size=size.small))
-            SessionLabelsRef.push(label.new(bar_index, sessionLevels.low, text=" LOD " + str.tostring(sessionLevels.low), style=label.style_label_up, color=hiLoColor, textcolor=color.red, size=size.small))
+            reset_labels(SessionLabelsRef)
+            SessionLabelsRef.push(label.new(bar_index, sessionLevels.high, text=" HOD " + str.tostring(sessionLevels.high), style=label.style_label_down, color=hiLoColor, textcolor=textColor, size=size.small))
+            SessionLabelsRef.push(label.new(bar_index, sessionLevels.low, text=" LOD " + str.tostring(sessionLevels.low), style=label.style_label_up, color=hiLoColor, textcolor=textColor, size=size.small))
 
         // IB levels
         if not first60min
@@ -449,8 +456,8 @@ if inRangeYesterday // limt number of processed bars lookback period
                     IBlinesRef.push(create_line(sessionLevels.ibh30, ibColor, line.style_solid))
                     IBlinesRef.push(create_line(sessionLevels.ibl30, ibColor, line.style_solid))
                 if showLabels   
-                    IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh30, text="IBH30 " + str.tostring(sessionLevels.ibh30), style=label.style_label_up, color=ibColor, textcolor=color.white, size=size.small))
-                    IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl30, text="IBL30 " + str.tostring(sessionLevels.ibl30), style=label.style_label_up, color=ibColor, textcolor=color.white, size=size.small))
+                    IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh30, text="IBH30 " + str.tostring(sessionLevels.ibh30), style=label.style_label_up, color=ibColor, textcolor=textColor, size=size.small))
+                    IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl30, text="IBL30 " + str.tostring(sessionLevels.ibl30), style=label.style_label_up, color=ibColor, textcolor=textColor, size=size.small))
                   
             // IB 60
             if time - firstHourStartTime >= 60 * 60 * 1000 and showIBlevels and not first60min
@@ -480,16 +487,16 @@ if inRangeYesterday // limt number of processed bars lookback period
             
                 if showLabels
                     if showIB60levels
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh, text=" IBH60 " + str.tostring(sessionLevels.ibh), style=label.style_label_up, color=ibColor, textcolor=color.black, size=size.small))
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl, text=" IBL60 " + str.tostring(sessionLevels.ibl), style=label.style_label_down, color=ibColor, textcolor=color.black, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh, text=" IBH60 " + str.tostring(sessionLevels.ibh), style=label.style_label_up, color=ibColor, textcolor=textColor, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl, text=" IBL60 " + str.tostring(sessionLevels.ibl), style=label.style_label_down, color=ibColor, textcolor=textColor, size=size.small))
                     if showIB1_5levels
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl1_5, text="IBL1.5 " + str.tostring(sessionLevels.ibl1_5), style=label.style_label_down, color=ibColorBl, textcolor=color.white, size=size.small))
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh1_5, text="IBH1.5 " + str.tostring(sessionLevels.ibh1_5), style=label.style_label_up, color=ibColorBl, textcolor=color.white, size=size.small))
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl0_5, text="IBL0.5 " + str.tostring(sessionLevels.ibl0_5), style=label.style_label_down, color=ibColorBl, textcolor=color.white, size=size.small))
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh0_5, text="IBH0.5 " + str.tostring(sessionLevels.ibh0_5), style=label.style_label_up, color=ibColorBl, textcolor=color.white, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl1_5, text="IBL1.5 " + str.tostring(sessionLevels.ibl1_5), style=label.style_label_down, color=ibColorBl, textcolor=textColor, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh1_5, text="IBH1.5 " + str.tostring(sessionLevels.ibh1_5), style=label.style_label_up, color=ibColorBl, textcolor=textColor, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl0_5, text="IBL0.5 " + str.tostring(sessionLevels.ibl0_5), style=label.style_label_down, color=ibColorBl, textcolor=textColor, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh0_5, text="IBH0.5 " + str.tostring(sessionLevels.ibh0_5), style=label.style_label_up, color=ibColorBl, textcolor=textColor, size=size.small))
                     if showIB2levels   
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl2, text="IBL2 " + str.tostring(sessionLevels.ibl2), style=label.style_label_down, color=ibColorBl, textcolor=color.white, size=size.small))
-                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh2, text="IBH2 " + str.tostring(sessionLevels.ibh2), style=label.style_label_up, color=ibColorBl, textcolor=color.white, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibl2, text="IBL2 " + str.tostring(sessionLevels.ibl2), style=label.style_label_down, color=ibColorBl, textcolor=textColor, size=size.small))
+                        IBlabelsRef.push(label.new(bar_index, sessionLevels.ibh2, text="IBH2 " + str.tostring(sessionLevels.ibh2), style=label.style_label_up, color=ibColorBl, textcolor=textColor, size=size.small))
 
         if endRTHSession or barstate.isconfirmed
             // Value area and VPOC
@@ -506,10 +513,10 @@ if inRangeYesterday // limt number of processed bars lookback period
 
             if showLabels    
                 if showVA
-                    SessionLabelsRef.push(label.new(time, sessionLevels.vah,xloc=xloc.bar_time,  text="VAH: " + str.tostring(sessionLevels.vah), color=vaColor, textcolor=color.black, style=label.style_label_down, size=size.small))
-                    SessionLabelsRef.push(label.new(bar_index, sessionLevels.val,  text="VAL: " + str.tostring(sessionLevels.val), color=vaColor, textcolor=color.black, style=label.style_label_up, size=size.small))
+                    SessionLabelsRef.push(label.new(time, sessionLevels.vah,xloc=xloc.bar_time,  text="VAH: " + str.tostring(sessionLevels.vah), color=vaColor, textcolor=textColor, style=label.style_label_down, size=size.small))
+                    SessionLabelsRef.push(label.new(bar_index, sessionLevels.val,  text="VAL: " + str.tostring(sessionLevels.val), color=vaColor, textcolor=textColor, style=label.style_label_up, size=size.small))
                 if showVPOC
-                    SessionLabelsRef.push(label.new(bar_index, sessionLevels.vpoc, text="VPOC: " + str.tostring(sessionLevels.vpoc), color=vaColor, textcolor=color.black, style=label.style_label_center, size=size.small))
+                    SessionLabelsRef.push(label.new(bar_index, sessionLevels.vpoc, text="VPOC: " + str.tostring(sessionLevels.vpoc), color=vaColor, textcolor=textColor, style=label.style_label_center, size=size.small))
             if showLines
                 if showVA
                     SessionLinesRef.push(create_line(sessionLevels.val, vaColor, line.style_solid))
