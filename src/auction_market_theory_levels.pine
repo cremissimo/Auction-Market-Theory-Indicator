@@ -358,7 +358,7 @@ if showPreviousONRefSession and endONSession
         for i = 0 to ONlinesRef.size() - 1 
             PastSessionLinesRef.push(ONlinesRef.get(i).copy())
 
-    if ONlinesRef.size() > 0
+    if ONlabelsRef.size() > 0
         for i = 0 to ONlabelsRef.size() - 1 
             PastSessionLabelsRef.push(ONlabelsRef.get(i).copy())  
 
